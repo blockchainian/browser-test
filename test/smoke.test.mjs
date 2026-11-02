@@ -51,7 +51,25 @@ let url
 
 before(async () => {
   await rm(RUNTIME_DIR, { recursive: true, force: true })
-  server = createServer((_, response) => {
+  server = createServer((request, response) => {
+    if (request.url === '/ua/sw.js') {
+      response.setHeader('content-type', 'text/javascript')
+      response.end(`
+        self.addEventListener('activate', (event) => {
+          event.waitUntil(self.clients.claim())
+        })
+        self.addEventListener('fetch', (event) => {
+          if (new URL(event.request.url).pathname === '/ua/user-agent') {
+            event.respondWith(new Response(self.navigator.userAgent))
+          }
+        })
+      `)
+      return
+    }
+    if (request.url === '/ua/user-agent') {
+      response.writeHead(404).end()
+      return
+    }
     response.setHeader('content-type', 'text/html')
     response.end('<!doctype html><title>probe</title>')
   })
@@ -84,6 +102,35 @@ test('headless test and host pages use a Chrome user agent', async () => {
           /HeadlessChrome/,
         )
       }
+      const page = browser.contexts()[0].pages()[0]
+      await page.goto(new URL('ua/', url).href)
+      assert.doesNotMatch(
+        await page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.register('sw.js')
+          try {
+            await navigator.serviceWorker.ready
+            if (!navigator.serviceWorker.controller) {
+              await new Promise((resolve) => {
+                navigator.serviceWorker.addEventListener(
+                  'controllerchange',
+                  resolve,
+                  { once: true },
+                )
+              })
+            }
+            const response = await fetch('user-agent')
+            if (!response.ok) {
+              throw new Error(
+                `Service Worker UA request failed: ${response.status}`,
+              )
+            }
+            return await response.text()
+          } finally {
+            await registration.unregister()
+          }
+        }),
+        /HeadlessChrome/,
+      )
     } finally {
       await browser.close()
     }
