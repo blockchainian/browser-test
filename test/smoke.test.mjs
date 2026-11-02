@@ -197,3 +197,47 @@ test('fixture state kept in the profile is hidden from tests on a new host', asy
     plain.child.kill()
   }
 })
+
+test('viewport null uses the window size in shared and isolated contexts', async () => {
+  for (const requires of ['key', '']) {
+    const probe = startProbe({
+      PROBE_URL: url,
+      PROBE_REQUIRES: requires,
+      PROBE_VIEWPORT: 'null',
+      PROBE_HOLD: '1',
+    })
+    try {
+      await waitForHeld(probe)
+      const state = JSON.parse(await readFile(HOST_STATE_FILE, 'utf8'))
+      assert.equal(state.viewport, null)
+      probe.child.stdin.end()
+      const { verdict, stderr } = await probe.done
+      assert.equal(verdict.verdict, 'pass', stderr)
+      assert.equal(verdict.checks[1].evidence, 'null')
+    } finally {
+      probe.child.stdin.end()
+      await probe.done
+    }
+  }
+})
+
+test('a running host cannot be reused with a different viewport', async () => {
+  const held = startProbe({ PROBE_URL: url, PROBE_HOLD: '1' })
+  try {
+    await waitForHeld(held)
+    const same = await startProbe({
+      PROBE_URL: url,
+      PROBE_VIEWPORT: '{"width":1440,"height":900}',
+    }).done
+    assert.equal(same.verdict.verdict, 'pass', same.stderr)
+    const { verdict } = await startProbe({
+      PROBE_URL: url,
+      PROBE_VIEWPORT: 'null',
+    }).done
+    assert.equal(verdict.verdict, 'inconclusive')
+    assert.match(verdict.errors.test[0], /launch configuration does not match/)
+  } finally {
+    held.child.stdin.end()
+    await held.done
+  }
+})

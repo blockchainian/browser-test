@@ -30,7 +30,7 @@ flowchart TD
 
 ```ts
 type Fixture = { name: string, isReady(context: BrowserContext): Promise<boolean>, apply(context: BrowserContext): Promise<void> }
-type BrowserTestConfig = { baseUrl: string, fixtures?: Fixture[], launchArgs?: string[] } // launchArgs extend Chromium's flags
+type BrowserTestConfig = { baseUrl: string, fixtures?: Fixture[], launchArgs?: string[], viewport?: { width: number, height: number } | null } // launchArgs extend Chromium's flags; viewport null uses the window size
 ```
 
 A fixture prepares the shared default context. A test names the fixtures it needs in `requires`. A new browser first records every fixture the profile already satisfies.

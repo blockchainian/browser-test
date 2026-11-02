@@ -196,7 +196,8 @@ class BrowserClient {
       ) {
         throw new Error('expected loopback endpoint and process id')
       }
-      return { endpoint: url.origin, pid: value.pid }
+      const { launchArgs = [], viewport = DEFAULT_VIEWPORT } = value
+      return { endpoint: url.origin, pid: value.pid, launchArgs, viewport }
     } catch (error) {
       // Invalid host state is rejected without exposing its contents.
       throw new Error('invalid test host state', { cause: error })
@@ -264,7 +265,7 @@ class BrowserClient {
     if (this.#lease.applied.some((name) => !requires.includes(name))) {
       this.#isolatedContext = await BrowserClient.withTimeout(
         'new isolated context',
-        this.#browser.newContext(),
+        this.#browser.newContext({ viewport: this.#config.viewport }),
       )
     }
     const context = this.#isolatedContext ?? this.#browser.contexts()[0]
@@ -345,6 +346,15 @@ class BrowserClient {
 
   async #leaseHost(leaseId) {
     const runningHost = await this.#findRunningHost()
+    const { launchArgs = [], viewport = DEFAULT_VIEWPORT } = this.#config
+    if (
+      runningHost &&
+      (JSON.stringify(runningHost.launchArgs) !== JSON.stringify(launchArgs) ||
+        runningHost.viewport?.width !== viewport?.width ||
+        runningHost.viewport?.height !== viewport?.height)
+    ) {
+      throw new Error('test host launch configuration does not match')
+    }
     const host = runningHost ?? (await this.#launchHost())
     const { leases, applied } = await this.#readHostState()
     const newlyApplied = await this.#ensureFixtures(host)
@@ -635,13 +645,15 @@ class BrowserHost {
   }
 
   #launchArgs
+  #viewport
 
   #port
 
   #context
 
-  constructor({ launchArgs = [] } = {}) {
+  constructor({ launchArgs = [], viewport = DEFAULT_VIEWPORT } = {}) {
     this.#launchArgs = launchArgs
+    this.#viewport = viewport
   }
 
   async launch() {
@@ -661,7 +673,10 @@ class BrowserHost {
         detached: true,
         env: {
           ...process.env,
-          [HOST_LAUNCH_ARGS_ENV]: JSON.stringify(this.#launchArgs),
+          [HOST_LAUNCH_ARGS_ENV]: JSON.stringify({
+            launchArgs: this.#launchArgs,
+            viewport: this.#viewport,
+          }),
         },
         stdio: ['ignore', logFd, logFd, 'ipc'],
       },
@@ -733,7 +748,7 @@ class BrowserHost {
     this.#port = await this.#findFreePort()
     return chromium.launchPersistentContext(join(RUNTIME_DIR, 'profile'), {
       headless: HEADLESS,
-      viewport: DEFAULT_VIEWPORT,
+      viewport: this.#viewport,
       args: [
         ...position,
         `--remote-debugging-port=${this.#port}`,
@@ -748,7 +763,12 @@ class BrowserHost {
   }
 
   #describe() {
-    return { endpoint: `http://${LOOPBACK}:${this.#port}`, pid: process.pid }
+    return {
+      endpoint: `http://${LOOPBACK}:${this.#port}`,
+      pid: process.pid,
+      launchArgs: this.#launchArgs,
+      viewport: this.#viewport,
+    }
   }
 
   async #findFreePort() {
@@ -844,7 +864,7 @@ JSON.stringify(displays)`,
 /**
  * Starts a browser test with its own Page in shared Chromium.
  * @param {{ test?: string, requires?: string[] }} [options] Inventory behavior and the names of the fixtures the test needs; a fixture applied to the shared browser but not required gets the test an isolated context.
- * @param {{ baseUrl: string, fixtures?: Array<{ name: string, isReady: (context: import('playwright').BrowserContext) => Promise<boolean>, apply: (context: import('playwright').BrowserContext) => Promise<void> }>, launchArgs?: string[] }} config The project's base URL, fixtures and extra Chromium launch arguments.
+ * @param {{ baseUrl: string, fixtures?: Array<{ name: string, isReady: (context: import('playwright').BrowserContext) => Promise<boolean>, apply: (context: import('playwright').BrowserContext) => Promise<void> }>, launchArgs?: string[], viewport?: { width: number, height: number } | null }} config The project's base URL, fixtures, extra Chromium launch arguments and viewport; null uses the window size.
  * @returns {Promise<BrowserTest>} The page-owning test; finish() emits its verdict and exits.
  * @throws {Error} Startup errors are handled by emitting an inconclusive verdict and exiting.
  */
@@ -878,7 +898,7 @@ export async function startBrowserTest(
 }
 
 if (process.argv[1] === BROWSER_TEST_PATH && process.argv[2] === HOST_FLAG) {
-  new BrowserHost({ launchArgs: JSON.parse(process.env[HOST_LAUNCH_ARGS_ENV]) })
+  new BrowserHost(JSON.parse(process.env[HOST_LAUNCH_ARGS_ENV]))
     .run()
     .catch((error) => {
       process.stderr.write(`${error.message}\n`)
