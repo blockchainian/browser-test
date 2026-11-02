@@ -40,4 +40,4 @@ if (process.env.PROBE_HOLD) {
   process.stderr.write('held\n')
   await new Promise((resolve) => process.stdin.once('end', resolve).resume())
 }
-await test.finish('fixture visibility')
+await test.finish()

@@ -31,7 +31,6 @@ const LOCK_RETRY_MS = 100
 const PRIVATE_FILE_MODE = 0o600
 const PRIVATE_DIR_MODE = 0o700
 const DEFAULT_VIEWPORT = { width: 1440, height: 900 }
-const MILLISECONDS_PER_SECOND = 1000
 const LOOPBACK = '127.0.0.1'
 const HOST_FLAG = '--host'
 const HOST_LAUNCH_ARGS_ENV = 'BROWSER_TEST_LAUNCH_ARGS'
@@ -68,12 +67,13 @@ function parseHeadless() {
 
 /**
  * Records one test's exclusive Page and verdict, releasing its host lease on finish.
- * @param {{ client: BrowserClient, baseUrl: string, startedAt?: number }} options
+ * @param {{ client: BrowserClient, baseUrl: string, behavior?: string, startedAt?: number }} options
  * @returns {BrowserTest} A page-owning test with checks, screenshots and console error records.
  * @throws {Error} A screenshot fails, its name is invalid or a check result is invalid.
  */
 export class BrowserTest {
   #client
+  #behavior
   #startedAt
   #page
   #checks = []
@@ -83,8 +83,9 @@ export class BrowserTest {
   #fatalCheckFailed = false
   #finished
 
-  constructor({ client, baseUrl, startedAt = Date.now() }) {
+  constructor({ client, baseUrl, behavior, startedAt = Date.now() }) {
     this.#client = client
+    this.#behavior = behavior
     this.baseUrl = baseUrl
     this.#startedAt = startedAt
   }
@@ -123,37 +124,37 @@ export class BrowserTest {
     }
   }
 
-  finish(test, options = {}) {
-    this.#finished ??= this.#teardown(test, options)
+  finish(options = {}) {
+    this.#finished ??= this.#teardown(options)
     return this.#finished
   }
 
-  async #teardown(test, { timing = {}, verdict, errors = [] } = {}) {
+  async #teardown({ timing = {}, verdict, errors = [] } = {}) {
     const releaseErrors = await this.#client.release(this.#page)
     if (releaseErrors.length > 0) {
       verdict = 'inconclusive'
     }
-    const result = this.#buildVerdict(test, timing, verdict, [
+    const result = this.#buildVerdict(timing, verdict, [
       ...errors,
       ...releaseErrors,
     ])
     process.stdout.write(`${JSON.stringify(result)}\n`, () => process.exit(0))
   }
 
-  #buildVerdict(test, timing, verdict, errors) {
+  #buildVerdict(timing, verdict, errors) {
     const elapsedMs = Date.now() - this.#startedAt
     const outcome = this.#checks.some((check) => check.result === 'fail')
       ? 'fail'
       : 'pass'
     return {
       verdict: this.#fatalCheckFailed ? 'fail' : verdict ?? outcome,
-      test,
+      test: this.#behavior,
       checks: this.#checks,
       errors: { console: this.#consoleErrorLines, test: errors },
       screenshots: this.#screenshots,
       timing: {
         ...timing,
-        total_s: Number((elapsedMs / MILLISECONDS_PER_SECOND).toFixed(2)),
+        total: elapsedMs,
       },
     }
   }
@@ -836,9 +837,9 @@ export async function startBrowserTest(
   config,
 ) {
   const client = new BrowserClient(config)
-  const test = new BrowserTest({ client, baseUrl: config.baseUrl })
+  const test = new BrowserTest({ client, baseUrl: config.baseUrl, behavior })
   const fail = (error) =>
-    test.finish(behavior, {
+    test.finish({
       verdict: 'inconclusive',
       errors: [error instanceof Error ? error.message : String(error)],
     })

@@ -62,6 +62,15 @@ before(async () => {
 
 after(() => server.close())
 
+test('verdict reports the behavior and total elapsed milliseconds', async () => {
+  const { verdict, stderr } = await startProbe({ PROBE_URL: url }).done
+  assert.equal(verdict.verdict, 'pass', stderr)
+  assert.equal(verdict.test, 'fixture visibility')
+  assert.ok(Number.isInteger(verdict.timing.total))
+  assert.ok(verdict.timing.total >= 0)
+  assert.ok(!Object.hasOwn(verdict.timing, 'total_s'))
+})
+
 test('fixture state is shared with tests that require it and hidden from others', async () => {
   // The first test holds its lease, so the browser that applied the fixture stays up.
   const requiring = startProbe({

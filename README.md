@@ -1,11 +1,11 @@
 # @blockchainian/browser-test
 
-A Playwright harness that runs each browser test as its own Node process. Tests in each mode share one Chromium that the project's fixtures prepare once, so independent processes run in parallel without repeating setup. The harness knows nothing about the project beyond the config it receives.
+A Playwright harness that runs each browser test as its own Node process. Tests in each mode share one Chromium that the project's fixtures prepare once.
 
 ## Install
 
 ```sh
-yarn add -D github:blockchainian/browser-test#<sha> playwright@1.64.1  # Playwright is a peer dependency
+yarn add -D github:blockchainian/browser-test#<sha> playwright@1.64.1
 ```
 
 ## Architecture
@@ -33,53 +33,76 @@ type Fixture = { name: string, isReady(context: BrowserContext): Promise<boolean
 type BrowserTestConfig = { baseUrl: string, fixtures?: Fixture[], launchArgs?: string[] } // launchArgs extend Chromium's flags
 ```
 
-A fixture prepares the shared default context, for example by signing in, and opens and closes its own pages. A test names the fixtures it needs in `requires`, and naming an unknown fixture is an error. Each required fixture is applied only when `isReady` reports false, and the browser records it as applied. Because the persistent profile outlives the browser, a new browser first records every fixture the profile already satisfies.
+A fixture prepares the shared default context. A test names the fixtures it needs in `requires. A new browser first records every fixture the profile already satisfies.
 
 A test whose `requires` covers every recorded fixture runs in the shared default context and shares its cookies and localStorage. Any other test runs in an isolated context with no fixture state.
 
 ## Interfaces
 
 ```js
-// e2e/browserTest.mjs: the project's one wrapper, which its tests import
 import { startBrowserTest as start } from '@blockchainian/browser-test'
-const config = { baseUrl: 'http://localhost:3000', fixtures: [signedIn] }
+
+const config = {
+    baseUrl: 'http://localhost:3000',
+    fixtures: [signedIn]
+}
+
 export const startBrowserTest = (options) => start(options, config)
 ```
 
 | Interface                                            | What it does                                                                                                           |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `startBrowserTest({ test, requires = [] }, config)`  | Resolves with a `BrowserTest` owning a new page; `test` is the behavior text, reported even if startup fails.          |
+| `startBrowserTest({ test, requires = [] }, config)`  | Resolves with a `BrowserTest` owning a new page.          |
 | `test.page`, `test.baseUrl`                          | The test's Playwright `Page` and the config's base URL.                                                                |
 | `test.check(assertion, result, evidence, { fatal })` | Records a check whose `result` is `'pass'`, `'fail'` or `'skip'`.                                                      |
-| `test.screenshot(name)`                              | Saves a PNG named with letters, digits and hyphens under `output/`, records it and resolves with its path.             |
-| `test.finish(test, { timing, verdict, errors })`     | Releases the page, prints the verdict and exits; `verdict` overrides the computed one and `errors` join `errors.test`. |
+| `test.screenshot(name)`                              | Saves a screenshot and resolves with its path.             |
+| `test.finish({ timing, verdict, errors })`     | Releases the page, prints the verdict and exits. |
 
 The verdict is the last line on stdout and takes one of three values:
 
-- `pass` when no check failed, and `fail` otherwise.
-- `inconclusive` on a startup or fixture failure, an uncaught exception, an interrupt, a missing `finish()`, or a failed page close or lease release, each listed in `errors.test`.
-- `fail` whenever a check marked `fatal` failed, overriding any other verdict.
+- `pass` when no check failed.
+- `fail` whenever a check marked `fatal` failed.
+- `inconclusive` on any unchecked error, each listed in `errors.test`.
 
-`errors.console` lists the page's console errors and never changes the verdict.
+`errors.console` lists the page's console errors and does not changes the verdict.
 
 ```json
-{ "verdict": "pass", "test": "Open the page to see its heading.", "checks": [{ "assertion": "heading visible", "result": "pass", "evidence": "Welcome" }],
-  "errors": { "console": [], "test": [] }, "screenshots": ["…/home-….png"], "timing": { "total_s": 2.29 } }
+{
+  "verdict": "pass",
+  "test": "Open the page to see its heading.",
+  "checks": [
+    {
+      "assertion": "heading visible",
+      "result": "pass",
+      "evidence": "Welcome"
+    }
+  ],
+  "errors": {
+    "console": [],
+    "test": []
+   },
+   "screenshots": ["x.png"],
+   "timing": {
+     "total": 2290
+   }
+}
 ```
 
 ## Running
 
-Run `node <test file>` inside the project's git repository, outside the Codex sandbox, while the application serves `baseUrl`. Tests run headless by default and `--headless=no` shows the browser, with no change to the test file. In headed mode, `BROWSER_DISPLAY` in `.browser-tests/.env` names the macOS display that opens the window.
+Run `node <test file>`.
 
-Each mode keeps its own browser under `.browser-tests/headless/` or `.browser-tests/headed/`, so both modes run at once. Add `.browser-tests/` to `.gitignore`.
+Tests run headless by default; `--headless=no` shows the browser. In headed mode, `BROWSER_DISPLAY` in `.browser-tests/.env` names the display.
+
+Each mode keeps its own browser under `.browser-tests/headless/` or `.browser-tests/headed/`.
 
 | Path                        | Contents                                                                                |
 | --------------------------- | --------------------------------------------------------------------------------------- |
-| `host.json`                 | CDP endpoint, host PID, active leases and applied fixtures.                             |
-| `startup.lock/`, `waiters/` | The lock a test holds while leasing or releasing, and one file per test waiting for it. |
-| `host.log`                  | Host output, lease and close events.                                                    |
 | `profile/`                  | The persistent Chromium profile.                                                        |
+| `host.json`                 | CDP endpoint, host PID, active leases and applied fixtures.                             |
+| `host.log`                  | Host output, lease and close events.                                                    |
 | `output/`                   | Screenshots, one directory per test run.                                                |
+| `startup.lock/`, `waiters/` | The lock a test holds while leasing or releasing, and one file per test waiting for it. |
 
 ## Writing a test
 
@@ -107,11 +130,7 @@ try {
 
 await test.screenshot('home')
 
-await test.finish(BEHAVIOR)
+await test.finish()
 ```
 
 Comment each step and separate steps with blank lines. Add no waits to make a test pass and no timeouts around the test; the harness owns them.
-
-## Tests
-
-`yarn test` checks that a test requiring a fixture sees its state, that a test requiring nothing does not, and that the latter still holds on a new browser whose profile kept the state.
