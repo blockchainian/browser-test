@@ -370,6 +370,17 @@ class BrowserClient {
     const host = await new BrowserHost(this.#config).launch()
     // A fixture can fail before a lease exists; keep the host available for cleanup.
     await this.#writeHostState(host, [], [])
+    // The persistent profile can already hold fixture state from an earlier host.
+    const ready = await this.#withDefaultContext(host, async (context) => {
+      const ready = []
+      for (const fixture of this.#config.fixtures ?? []) {
+        if (await fixture.isReady(context)) {
+          ready.push(fixture.name)
+        }
+      }
+      return ready
+    })
+    await this.#writeHostState(host, [], ready)
     return host
   }
 
@@ -378,12 +389,7 @@ class BrowserClient {
     if (this.#requires.length === 0) {
       return []
     }
-    const browser = await BrowserClient.#connect(host.endpoint)
-    try {
-      const context = browser.contexts()[0]
-      if (context === undefined) {
-        throw new Error('default browser context absent')
-      }
+    return this.#withDefaultContext(host, async (context) => {
       const newlyApplied = []
       for (const fixture of this.#requires) {
         if (!(await fixture.isReady(context))) {
@@ -392,6 +398,17 @@ class BrowserClient {
         }
       }
       return newlyApplied
+    })
+  }
+
+  async #withDefaultContext(host, operation) {
+    const browser = await BrowserClient.#connect(host.endpoint)
+    try {
+      const context = browser.contexts()[0]
+      if (context === undefined) {
+        throw new Error('default browser context absent')
+      }
+      return await operation(context)
     } finally {
       // Closing a connectOverCDP client disconnects it, leaving Chromium alive.
       await browser.close()

@@ -87,7 +87,7 @@ The first test to find no running browser starts a detached host process, `node 
 
 Under the startup lock, a test takes its lease and then looks up each fixture named in `requires`. It calls `isReady` on the shared default context and applies the fixture with `apply` when it is not ready. Every fixture applied on the shared browser is recorded in the host state, so each is applied once per browser. A test whose `requires` covers all recorded fixtures opens its page in the shared default context and sees their effects. A test that does not require a recorded fixture opens its page in a new isolated context with no shared state, and that context is closed with the test. A name in `requires` that the config does not define is an error.
 
-Fixture state lives in the profile, so it can outlive the host. On a fresh host nothing is recorded yet, and a test that requires nothing shares the default context with whatever the profile retained. The browser closes when the last lease and the last waiting test are gone.
+When the host is launched, `isReady` runs for every configured fixture and the ones already ready are recorded, because fixture state kept in the persistent profile survives the host. A test that requires nothing therefore gets an isolated context on a fresh host too. The browser closes when the last lease and the last waiting test are gone.
 
 ## Runtime layout
 
@@ -108,4 +108,4 @@ Add `.browser-tests/` to the project's `.gitignore`.
 
 ## Tests
 
-`yarn test` runs a smoke test that serves a local page and applies a fixture that sets a localStorage key. It checks that a test requiring the fixture sees the key and that a test requiring nothing gets an isolated context without it.
+`yarn test` runs a smoke test that serves a local page and applies a fixture that sets a localStorage key. It checks that a test requiring the fixture sees the key, that a test requiring nothing gets an isolated context without it, and that the same holds on a new host whose profile still holds the key.

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { rm } from 'node:fs/promises'
-import { test } from 'node:test'
+import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const PROBE = fileURLToPath(new URL('probe.mjs', import.meta.url))
@@ -42,16 +42,23 @@ async function waitForHeld(probe) {
   }
 }
 
-test('fixture state is shared with tests that require it and hidden from others', async () => {
+let server
+let url
+
+before(async () => {
   await rm(RUNTIME_DIR, { recursive: true, force: true })
-  const server = createServer((_, response) => {
+  server = createServer((_, response) => {
     response.setHeader('content-type', 'text/html')
     response.end('<!doctype html><title>probe</title>')
   })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
-  const url = `http://127.0.0.1:${server.address().port}/`
+  url = `http://127.0.0.1:${server.address().port}/`
+})
 
+after(() => server.close())
+
+test('fixture state is shared with tests that require it and hidden from others', async () => {
   // The first test holds its lease, so the browser that applied the fixture stays up.
   const requiring = startProbe({
     PROBE_URL: url,
@@ -70,6 +77,12 @@ test('fixture state is shared with tests that require it and hidden from others'
     assert.equal(verdict.checks[0].evidence, 'set')
   } finally {
     requiring.child.kill()
-    server.close()
   }
+})
+
+test('fixture state kept in the profile is hidden from tests on a new host', async () => {
+  // The previous test's host has closed, but its profile still holds the key.
+  const plain = await startProbe({ PROBE_URL: url }).done
+  assert.equal(plain.verdict.verdict, 'pass', plain.stderr)
+  assert.equal(plain.verdict.checks[0].evidence, 'null')
 })
