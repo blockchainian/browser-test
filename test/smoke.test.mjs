@@ -71,6 +71,31 @@ test('verdict reports the behavior and total elapsed milliseconds', async () => 
   assert.ok(!Object.hasOwn(verdict.timing, 'total_s'))
 })
 
+test('headless test and host pages use a Chrome user agent', async () => {
+  const probe = startProbe({ PROBE_URL: url, PROBE_HOLD: '1' })
+  try {
+    await waitForHeld(probe)
+    const state = JSON.parse(await readFile(HOST_STATE_FILE, 'utf8'))
+    const browser = await chromium.connectOverCDP(state.endpoint)
+    try {
+      for (const page of browser.contexts()[0].pages()) {
+        assert.doesNotMatch(
+          await page.evaluate(() => navigator.userAgent),
+          /HeadlessChrome/,
+        )
+      }
+    } finally {
+      await browser.close()
+    }
+    probe.child.stdin.end()
+    const { verdict, stderr } = await probe.done
+    assert.equal(verdict.verdict, 'pass', stderr)
+  } finally {
+    probe.child.stdin.end()
+    await probe.done
+  }
+})
+
 test('fixture state is shared with tests that require it and hidden from others', async () => {
   // The first test holds its lease, so the browser that applied the fixture stays up.
   const requiring = startProbe({

@@ -24,8 +24,7 @@ import { parseEnv } from 'node:util'
 import { chromium } from 'playwright'
 
 const OPERATION_TIMEOUT_MS = 30_000
-const GOTO_TIMEOUT_MS = 5_000
-const HOST_START_TIMEOUT_MS = 90_000
+const HOST_START_TIMEOUT_MS = 30_000
 const HOST_CHECK_TIMEOUT_MS = 2_000
 const LOCK_RETRY_MS = 100
 const PRIVATE_FILE_MODE = 0o600
@@ -99,7 +98,6 @@ export class BrowserTest {
       throw new Error('test already owns a page')
     }
     this.#page = page
-    page.setDefaultNavigationTimeout(GOTO_TIMEOUT_MS)
     page.on('console', (message) => this.#recordConsole(message))
   }
 
@@ -228,6 +226,18 @@ class BrowserClient {
     }
   }
 
+  static async useChromeUserAgent(context, page) {
+    if (!HEADLESS) {
+      return
+    }
+    // Detaching the session resets the UA; page or browser closure releases it.
+    const session = await context.newCDPSession(page)
+    const { userAgent } = await session.send('Browser.getVersion')
+    await session.send('Emulation.setUserAgentOverride', {
+      userAgent: userAgent.replace('HeadlessChrome', 'Chrome'),
+    })
+  }
+
   static #connect(endpoint) {
     return chromium.connectOverCDP(endpoint, { timeout: OPERATION_TIMEOUT_MS })
   }
@@ -273,7 +283,9 @@ class BrowserClient {
     if (context === undefined) {
       throw new Error('default browser context absent')
     }
-    return BrowserClient.withTimeout('new page', context.newPage())
+    const page = await BrowserClient.withTimeout('new page', context.newPage())
+    await BrowserClient.useChromeUserAgent(context, page)
+    return page
   }
 
   async release(page) {
@@ -501,7 +513,9 @@ class BrowserClient {
         await this.#pruneLock()
         await sleep(LOCK_RETRY_MS)
       }
-      throw new Error('test host startup lock exceeded 90s')
+      throw new Error(
+        `test host startup lock exceeded ${HOST_START_TIMEOUT_MS / 1000}s`,
+      )
     } finally {
       await rm(path, { recursive: true, force: true })
     }
@@ -685,9 +699,10 @@ class BrowserHost {
 
   static #startFailure(error, timeout, exited) {
     if (timeout.aborted) {
-      return new Error(`test host startup exceeded 90s; see ${HOST_LOG_FILE}`, {
-        cause: error,
-      })
+      return new Error(
+        `test host startup exceeded ${HOST_START_TIMEOUT_MS / 1000}s; see ${HOST_LOG_FILE}`,
+        { cause: error },
+      )
     }
     if (exited.aborted) {
       return new Error(exited.reason.message, { cause: error })
@@ -698,6 +713,8 @@ class BrowserHost {
   async run() {
     try {
       this.#context = await this.#launchChromium()
+      const page = this.#context.pages()[0] ?? (await this.#context.newPage())
+      await BrowserClient.useChromeUserAgent(this.#context, page)
       const host = this.#describe()
       process.stdout.write(`${JSON.stringify({ event: 'ready', ...host })}\n`)
       process.send?.(host)
