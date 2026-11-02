@@ -33,7 +33,7 @@ type Fixture = { name: string, isReady(context: BrowserContext): Promise<boolean
 type BrowserTestConfig = { baseUrl: string, fixtures?: Fixture[], launchArgs?: string[] } // launchArgs extend Chromium's flags
 ```
 
-A fixture prepares the shared default context. A test names the fixtures it needs in `requires. A new browser first records every fixture the profile already satisfies.
+A fixture prepares the shared default context. A test names the fixtures it needs in `requires`. A new browser first records every fixture the profile already satisfies.
 
 A test whose `requires` covers every recorded fixture runs in the shared default context and shares its cookies and localStorage. Any other test runs in an isolated context with no fixture state.
 
@@ -64,7 +64,7 @@ The verdict is the last line on stdout and takes one of three values:
 - `fail` whenever a check marked `fatal` failed.
 - `inconclusive` on any unchecked error, each listed in `errors.test`.
 
-`errors.console` lists the page's console errors and does not changes the verdict.
+`errors.console` lists the page's console errors and does not change the verdict.
 
 ```json
 {
