@@ -1,0 +1,19 @@
+{
+  "name": "@blockchainian/browser-test",
+  "version": "0.1.0",
+  "description": "Shared Playwright browser-test harness",
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/smoke.test.mjs"
+  },
+  "peerDependencies": {
+    "playwright": "^1.64.1"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}
