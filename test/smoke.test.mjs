@@ -2,14 +2,18 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
-import { rm } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+
+import { chromium } from 'playwright'
 
 const PROBE = fileURLToPath(new URL('probe.mjs', import.meta.url))
 const RUNTIME_DIR = fileURLToPath(
   new URL('../.browser-tests/headless', import.meta.url),
 )
+
+const HOST_STATE_FILE = `${RUNTIME_DIR}/host.json`
 
 function startProbe(env) {
   const child = spawn(process.execPath, [PROBE, '--headless=yes'], {
@@ -82,7 +86,33 @@ test('fixture state is shared with tests that require it and hidden from others'
 
 test('fixture state kept in the profile is hidden from tests on a new host', async () => {
   // The previous test's host has closed, but its profile still holds the key.
-  const plain = await startProbe({ PROBE_URL: url }).done
-  assert.equal(plain.verdict.verdict, 'pass', plain.stderr)
-  assert.equal(plain.verdict.checks[0].evidence, 'null')
+  const plain = startProbe({ PROBE_URL: url, PROBE_HOLD: '1' })
+  try {
+    await waitForHeld(plain)
+
+    // The new host recorded the key fixture as applied from the profile alone.
+    const state = JSON.parse(await readFile(HOST_STATE_FILE, 'utf8'))
+    assert.deepEqual(state.applied, ['key'])
+
+    // The shared default context still has the key; only the test is isolated.
+    const browser = await chromium.connectOverCDP(state.endpoint)
+    try {
+      const page = await browser.contexts()[0].newPage()
+      await page.goto(url)
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem('key')),
+        'set',
+      )
+      await page.close()
+    } finally {
+      await browser.close()
+    }
+
+    plain.child.stdin.end()
+    const { verdict, stderr } = await plain.done
+    assert.equal(verdict.verdict, 'pass', stderr)
+    assert.equal(verdict.checks[0].evidence, 'null')
+  } finally {
+    plain.child.kill()
+  }
 })
