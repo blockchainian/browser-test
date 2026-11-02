@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { createServer } from 'node:http'
+import { rm } from 'node:fs/promises'
+import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
+
+const PROBE = fileURLToPath(new URL('probe.mjs', import.meta.url))
+const RUNTIME_DIR = fileURLToPath(
+  new URL('../.browser-tests/headless', import.meta.url),
+)
+
+function startProbe(env) {
+  const child = spawn(process.execPath, [PROBE, '--headless=yes'], {
+    env: { ...process.env, ...env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (chunk) => (stdout += chunk))
+  child.stderr.on('data', (chunk) => (stderr += chunk))
+  const done = once(child, 'exit').then(() => {
+    const verdict = JSON.parse(stdout.trim().split('\n').at(-1))
+    return { verdict, stderr }
+  })
+  return {
+    child,
+    done,
+    get stderr() {
+      return stderr
+    },
+  }
+}
+
+async function waitForHeld(probe) {
+  while (!probe.stderr.includes('held')) {
+    if (probe.child.exitCode !== null) {
+      throw new Error(`probe exited early: ${probe.stderr}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
+
+test('fixture state is shared with tests that require it and hidden from others', async () => {
+  await rm(RUNTIME_DIR, { recursive: true, force: true })
+  const server = createServer((_, response) => {
+    response.setHeader('content-type', 'text/html')
+    response.end('<!doctype html><title>probe</title>')
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const url = `http://127.0.0.1:${server.address().port}/`
+
+  // The first test holds its lease, so the browser that applied the fixture stays up.
+  const requiring = startProbe({
+    PROBE_URL: url,
+    PROBE_REQUIRES: 'key',
+    PROBE_HOLD: '1',
+  })
+  try {
+    await waitForHeld(requiring)
+    const plain = await startProbe({ PROBE_URL: url }).done
+    assert.equal(plain.verdict.verdict, 'pass', plain.stderr)
+    assert.equal(plain.verdict.checks[0].evidence, 'null')
+
+    requiring.child.stdin.end()
+    const { verdict } = await requiring.done
+    assert.equal(verdict.verdict, 'pass')
+    assert.equal(verdict.checks[0].evidence, 'set')
+  } finally {
+    requiring.child.kill()
+    server.close()
+  }
+})
