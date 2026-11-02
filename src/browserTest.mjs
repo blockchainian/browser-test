@@ -226,18 +226,6 @@ class BrowserClient {
     }
   }
 
-  static async useChromeUserAgent(context, page) {
-    if (!HEADLESS) {
-      return
-    }
-    // Detaching the session resets the UA; page or browser closure releases it.
-    const session = await context.newCDPSession(page)
-    const { userAgent } = await session.send('Browser.getVersion')
-    await session.send('Emulation.setUserAgentOverride', {
-      userAgent: userAgent.replace('HeadlessChrome', 'Chrome'),
-    })
-  }
-
   static #connect(endpoint) {
     return chromium.connectOverCDP(endpoint, { timeout: OPERATION_TIMEOUT_MS })
   }
@@ -284,7 +272,6 @@ class BrowserClient {
       throw new Error('default browser context absent')
     }
     const page = await BrowserClient.withTimeout('new page', context.newPage())
-    await BrowserClient.useChromeUserAgent(context, page)
     return page
   }
 
@@ -713,8 +700,6 @@ class BrowserHost {
   async run() {
     try {
       this.#context = await this.#launchChromium()
-      const page = this.#context.pages()[0] ?? (await this.#context.newPage())
-      await BrowserClient.useChromeUserAgent(this.#context, page)
       const host = this.#describe()
       process.stdout.write(`${JSON.stringify({ event: 'ready', ...host })}\n`)
       process.send?.(host)
@@ -732,6 +717,19 @@ class BrowserHost {
 
   async #launchChromium() {
     const position = HEADLESS ? [] : await this.#windowPosition()
+    const userAgentArgs = []
+    if (HEADLESS) {
+      const version = execFileSync(chromium.executablePath(), ['--version'], {
+        encoding: 'utf8',
+      }).trim()
+      const match = version.match(/\b(\d+)\.\d+\.\d+\.\d+\b/)
+      if (!match) {
+        throw new Error(`could not parse Chromium version: ${version}`)
+      }
+      userAgentArgs.push(
+        `--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${match[1]}.0.0.0 Safari/537.36`,
+      )
+    }
     this.#port = await this.#findFreePort()
     return chromium.launchPersistentContext(join(RUNTIME_DIR, 'profile'), {
       headless: HEADLESS,
@@ -743,6 +741,7 @@ class BrowserHost {
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
+        ...userAgentArgs,
         ...this.#launchArgs,
       ],
     })
