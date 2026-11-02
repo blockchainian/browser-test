@@ -41,6 +41,14 @@ await test.page.goto(test.baseUrl)
 const value = await test.page.evaluate(() => localStorage.getItem('key'))
 test.check('key value', 'pass', String(value))
 test.check('viewport size', 'pass', JSON.stringify(test.page.viewportSize()))
+test.check(
+  'window size',
+  'pass',
+  JSON.stringify(await test.page.evaluate(() => ({
+    width: innerWidth,
+    height: innerHeight,
+  }))),
+)
 
 if (process.env.PROBE_HOLD) {
   // Keeps the lease so the shared browser stays up while another test runs.

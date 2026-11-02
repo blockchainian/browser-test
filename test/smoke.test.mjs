@@ -221,18 +221,47 @@ test('viewport null uses the window size in shared and isolated contexts', async
   }
 })
 
+test('the default headless viewport uses a 1440x900 window', async () => {
+  for (const requires of ['key', '']) {
+    const { verdict, stderr } = await startProbe({
+      PROBE_URL: url,
+      PROBE_REQUIRES: requires,
+    }).done
+    assert.equal(verdict.verdict, 'pass', stderr)
+    assert.equal(verdict.checks[1].evidence, 'null')
+    assert.deepEqual(JSON.parse(verdict.checks[2].evidence), {
+      width: 1440,
+      height: 900,
+    })
+  }
+})
+
+test('an explicit viewport emulates the requested size', async () => {
+  for (const requires of ['key', '']) {
+    const viewport = { width: 960, height: 640 }
+    const { verdict, stderr } = await startProbe({
+      PROBE_URL: url,
+      PROBE_REQUIRES: requires,
+      PROBE_VIEWPORT: JSON.stringify(viewport),
+    }).done
+    assert.equal(verdict.verdict, 'pass', stderr)
+    assert.deepEqual(JSON.parse(verdict.checks[1].evidence), viewport)
+    assert.deepEqual(JSON.parse(verdict.checks[2].evidence), viewport)
+  }
+})
+
 test('a running host cannot be reused with a different viewport', async () => {
   const held = startProbe({ PROBE_URL: url, PROBE_HOLD: '1' })
   try {
     await waitForHeld(held)
     const same = await startProbe({
       PROBE_URL: url,
-      PROBE_VIEWPORT: '{"width":1440,"height":900}',
+      PROBE_VIEWPORT: 'null',
     }).done
     assert.equal(same.verdict.verdict, 'pass', same.stderr)
     const { verdict } = await startProbe({
       PROBE_URL: url,
-      PROBE_VIEWPORT: 'null',
+      PROBE_VIEWPORT: '{"width":1440,"height":900}',
     }).done
     assert.equal(verdict.verdict, 'inconclusive')
     assert.match(verdict.errors.test[0], /launch configuration does not match/)

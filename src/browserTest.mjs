@@ -29,7 +29,6 @@ const HOST_CHECK_TIMEOUT_MS = 2_000
 const LOCK_RETRY_MS = 100
 const PRIVATE_FILE_MODE = 0o600
 const PRIVATE_DIR_MODE = 0o700
-const DEFAULT_VIEWPORT = { width: 1440, height: 900 }
 const LOOPBACK = '127.0.0.1'
 const HOST_FLAG = '--host'
 const HOST_LAUNCH_ARGS_ENV = 'BROWSER_TEST_LAUNCH_ARGS'
@@ -196,7 +195,7 @@ class BrowserClient {
       ) {
         throw new Error('expected loopback endpoint and process id')
       }
-      const { launchArgs = [], viewport = DEFAULT_VIEWPORT } = value
+      const { launchArgs = [], viewport = null } = value
       return { endpoint: url.origin, pid: value.pid, launchArgs, viewport }
     } catch (error) {
       // Invalid host state is rejected without exposing its contents.
@@ -265,7 +264,7 @@ class BrowserClient {
     if (this.#lease.applied.some((name) => !requires.includes(name))) {
       this.#isolatedContext = await BrowserClient.withTimeout(
         'new isolated context',
-        this.#browser.newContext({ viewport: this.#config.viewport }),
+        this.#browser.newContext({ viewport: null }),
       )
     }
     const context = this.#isolatedContext ?? this.#browser.contexts()[0]
@@ -273,6 +272,9 @@ class BrowserClient {
       throw new Error('default browser context absent')
     }
     const page = await BrowserClient.withTimeout('new page', context.newPage())
+    if (this.#config.viewport != null) {
+      await page.setViewportSize(this.#config.viewport)
+    }
     return page
   }
 
@@ -346,7 +348,7 @@ class BrowserClient {
 
   async #leaseHost(leaseId) {
     const runningHost = await this.#findRunningHost()
-    const { launchArgs = [], viewport = DEFAULT_VIEWPORT } = this.#config
+    const { launchArgs = [], viewport = null } = this.#config
     if (
       runningHost &&
       (JSON.stringify(runningHost.launchArgs) !== JSON.stringify(launchArgs) ||
@@ -651,7 +653,7 @@ class BrowserHost {
 
   #context
 
-  constructor({ launchArgs = [], viewport = DEFAULT_VIEWPORT } = {}) {
+  constructor({ launchArgs = [], viewport = null } = {}) {
     this.#launchArgs = launchArgs
     this.#viewport = viewport
   }
@@ -748,9 +750,10 @@ class BrowserHost {
     this.#port = await this.#findFreePort()
     return chromium.launchPersistentContext(join(RUNTIME_DIR, 'profile'), {
       headless: HEADLESS,
-      viewport: this.#viewport,
+      viewport: null,
       args: [
         ...position,
+        ...(HEADLESS ? ['--window-size=1440,900'] : []),
         `--remote-debugging-port=${this.#port}`,
         `--remote-debugging-address=${LOOPBACK}`,
         '--disable-background-timer-throttling',
@@ -864,7 +867,7 @@ JSON.stringify(displays)`,
 /**
  * Starts a browser test with its own Page in shared Chromium.
  * @param {{ test?: string, requires?: string[] }} [options] Inventory behavior and the names of the fixtures the test needs; a fixture applied to the shared browser but not required gets the test an isolated context.
- * @param {{ baseUrl: string, fixtures?: Array<{ name: string, isReady: (context: import('playwright').BrowserContext) => Promise<boolean>, apply: (context: import('playwright').BrowserContext) => Promise<void> }>, launchArgs?: string[], viewport?: { width: number, height: number } | null }} config The project's base URL, fixtures, extra Chromium launch arguments and viewport; null uses the window size.
+ * @param {{ baseUrl: string, fixtures?: Array<{ name: string, isReady: (context: import('playwright').BrowserContext) => Promise<boolean>, apply: (context: import('playwright').BrowserContext) => Promise<void> }>, launchArgs?: string[], viewport?: { width: number, height: number } | null }} config The project's base URL, fixtures, extra Chromium launch arguments and optional fixed viewport; omitted or null uses the window size.
  * @returns {Promise<BrowserTest>} The page-owning test; finish() emits its verdict and exits.
  * @throws {Error} Startup errors are handled by emitting an inconclusive verdict and exiting.
  */
